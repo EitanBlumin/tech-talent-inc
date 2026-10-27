@@ -12,4 +12,5 @@ Remember:
 - [Tech Talent Inc. - itch.io page](https://eitanblumin.itch.io/tech-talent-inc)
 
 
-Copyright Eitan Blumin, 2026
+©️ Copyright Eitan Blumin, 2026
+®️ All Rights Reserved
