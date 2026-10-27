@@ -60,6 +60,7 @@ NOTE: Planned features may change.
 ## Links
 
 - [Tech Talent Inc. - itch.io page](https://discoverace.itch.io/tech-talent-inc)
+- [Discoverace Games Discord server](https://discord.gg/7naYT5WC)
 
 ---
 
