@@ -1,0 +1,106 @@
+name: Auto-close Duplicate Issues
+
+# Part 2 of 2: closes issues that have carried the `possible-duplicate` label
+# for 3+ days with no human pushback. Pairs with claude-dedupe-issues.yml.
+
+on:
+  schedule:
+    - cron: "0 9 * * *"   # daily at 09:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Log what would be closed without closing anything"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: auto-close-duplicates
+  cancel-in-progress: false
+
+jobs:
+  close-duplicates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Close stale possible-duplicate issues
+        uses: actions/github-script@v7
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const LABEL = 'possible-duplicate';
+            const MARKER = '<!-- claude-dedupe-bot -->';
+            const GRACE_DAYS = 3;
+            const dryRun = process.env.DRY_RUN === 'true';
+            const cutoff = Date.now() - GRACE_DAYS * 24 * 60 * 60 * 1000;
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: LABEL, per_page: 100,
+            });
+
+            core.info(`Found ${issues.length} open issue(s) labeled "${LABEL}". Dry run: ${dryRun}`);
+
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+              const n = issue.number;
+
+              // When was the label most recently applied?
+              const events = await github.paginate(github.rest.issues.listEvents, {
+                owner, repo, issue_number: n, per_page: 100,
+              });
+              const labeledAt = events
+                .filter(e => e.event === 'labeled' && e.label?.name === LABEL)
+                .map(e => new Date(e.created_at).getTime())
+                .sort((a, b) => b - a)[0];
+
+              if (!labeledAt) { core.info(`#${n}: no label event found; skipping.`); continue; }
+              if (labeledAt > cutoff) { core.info(`#${n}: grace period not over yet; skipping.`); continue; }
+
+              // Find our duplicate notice
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: n, per_page: 100,
+              });
+              const botComment = [...comments].reverse().find(c => c.body?.includes(MARKER));
+              if (!botComment) { core.info(`#${n}: no duplicate notice found; skipping.`); continue; }
+
+              // Any human comment after the notice counts as a rebuttal
+              const botTime = new Date(botComment.created_at).getTime();
+              const rebuttal = comments.find(c =>
+                new Date(c.created_at).getTime() > botTime &&
+                c.user?.type !== 'Bot' &&
+                !c.body?.includes(MARKER)
+              );
+              if (rebuttal) {
+                core.info(`#${n}: human replied (${rebuttal.user?.login}); skipping.`);
+                continue;
+              }
+
+              // A thumbs-down from the issue author on the notice counts too
+              const reactions = await github.paginate(github.rest.reactions.listForIssueComment, {
+                owner, repo, comment_id: botComment.id, per_page: 100,
+              });
+              if (reactions.some(r => r.content === '-1' && r.user?.login === issue.user?.login)) {
+                core.info(`#${n}: author gave a thumbs-down on the notice; skipping.`);
+                continue;
+              }
+
+              if (dryRun) { core.info(`#${n}: [dry run] would close.`); continue; }
+
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: n,
+                body: [
+                  `Closing this issue as a duplicate, since it has been ${GRACE_DAYS} days with no response.`,
+                  '',
+                  "If this was closed in error, just leave a comment and we'll be happy to reopen it.",
+                ].join('\n'),
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: n, state: 'closed', state_reason: 'not_planned',
+              });
+              core.info(`#${n}: closed.`);
+            }
