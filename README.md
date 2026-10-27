@@ -59,7 +59,7 @@ NOTE: Planned features may change.
 
 ## Links
 
-- [Tech Talent Inc. - itch.io page](https://eitanblumin.itch.io/tech-talent-inc)
+- [Tech Talent Inc. - itch.io page](https://discoverace.itch.io/tech-talent-inc)
 
 ---
 
